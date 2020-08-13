@@ -99,7 +99,7 @@ void reshade::d3d11::buffer_detection::on_draw(UINT vertices)
     if (vertices == 0)
         _has_indirect_drawcalls = true;
 
-    // Check if this draw call likely represets a fullscreen rectangle (one or two triangles), which would clear the depth-stencil
+    // Check if this draw call likely represents a fullscreen rectangle (one or two triangles), which would clear the depth-stencil
     if (_context->preserve_depth_buffers && vertices <= 6 && _depth_stencil_cleared) {
         D3D11_RASTERIZER_DESC rs_desc;
         com_ptr<ID3D11RasterizerState> rs;
@@ -161,17 +161,24 @@ void reshade::d3d11::buffer_detection::on_clear_depthstencil(UINT clear_flags, I
     counters.clears.push_back(counters.current_stats);
 
     // Make a backup copy of the depth texture before it is cleared
-    if (_context->depthstencil_clear_index.second == 0 ?
-                                                       // If clear index override is set to zero, always copy any suitable buffers
-            fullscreen_draw_call || counters.current_stats.vertices > _best_copy_stats.vertices
-                                                       :
-                                                       // This is not really correct, since clears may accumulate over multiple command lists, but it's unlikely that the same depth-stencil is used in more than one
-            counters.clears.size() == _context->depthstencil_clear_index.second) {
-        // Since clears from fullscreen draw calls are selected based on their order (last one wins), their stats are ignored for the regular clear heuristic
-        if (!fullscreen_draw_call)
+    // If clear index override is set to zero, always copy any suitable buffers
+    // This is not really correct, since clears may accumulate over multiple command lists, but it's unlikely that the same depth-stencil is used in more than once
+    // Since clears from fullscreen draw calls are selected based on their order (last one wins), their stats are ignored for the regular clear heuristic
+    if (_context->depthstencil_clear_index.second == 0
+            ? fullscreen_draw_call || counters.current_stats.drawcalls > _best_copy_stats.drawcalls
+            : counters.clears.size() == _context->depthstencil_clear_index.second) {
+        if (!fullscreen_draw_call) {
             _best_copy_stats = counters.current_stats;
+        }
 
         _device_context->CopyResource(_context->_depthstencil_clear_texture.get(), dsv_texture.get());
+    }
+
+    UINT selectedIndex = _context->depth_buffer_alt_index;
+    if (_context->_depthstencil_alternative == nullptr || selectedIndex == 0) {
+        _device_context->CopyResource(_context->_depthstencil_alternative.get(), dsv_texture.get());
+    } else if (selectedIndex == counters.clears.size()) {
+        _device_context->CopyResource(_context->_depthstencil_alternative.get(), dsv_texture.get());
     }
 
     // Reset draw call stats for clears
@@ -199,6 +206,34 @@ bool reshade::d3d11::buffer_detection_context::update_depthstencil_clear_texture
     _device_context->GetDevice(&device);
 
     if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_clear_texture); FAILED(hr)) {
+        LOG(ERROR) << "Failed to create depth-stencil texture! HRESULT is " << hr << '.';
+        return false;
+    }
+
+    return true;
+}
+
+bool reshade::d3d11::buffer_detection_context::update_depthstencil_alt_texture(D3D11_TEXTURE2D_DESC desc)
+{
+    if (_depthstencil_alternative != nullptr) {
+        D3D11_TEXTURE2D_DESC existing_desc;
+        _depthstencil_alternative->GetDesc(&existing_desc);
+
+        if (desc.Width == existing_desc.Width && desc.Height == existing_desc.Height && desc.Format == existing_desc.Format)
+            return true; // Texture already matches dimensions, so can re-use
+        else
+            _depthstencil_alternative.reset();
+    }
+
+    assert(_device_context != nullptr);
+
+    desc.Format = make_dxgi_format_typeless(desc.Format);
+    desc.BindFlags = D3D11_BIND_DEPTH_STENCIL | D3D11_BIND_SHADER_RESOURCE;
+
+    com_ptr<ID3D11Device> device;
+    _device_context->GetDevice(&device);
+
+    if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_alternative); FAILED(hr)) {
         LOG(ERROR) << "Failed to create depth-stencil texture! HRESULT is " << hr << '.';
         return false;
     }
@@ -257,22 +292,25 @@ com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_dep
         D3D11_TEXTURE2D_DESC desc;
         best_match->GetDesc(&desc);
 
+        update_depthstencil_alt_texture(desc);
+
         if (update_depthstencil_clear_texture(desc)) {
-            UINT bestClearVerticies = 0, bestClearDrawcalls = 0, bestClearIndex = 0;
+            UINT bestClearDrawcalls = 0, bestClearIndex = 0;
 
-            for (UINT clear_index = 1; clear_index <= best_snapshot.clears.size(); ++clear_index) {
-                if (best_snapshot.clears[clear_index - 1].drawcalls > bestClearDrawcalls && best_snapshot.clears[clear_index - 1].vertices > bestClearVerticies) {
-                    bestClearDrawcalls = best_snapshot.clears[clear_index - 1].drawcalls;
-                    bestClearVerticies = best_snapshot.clears[clear_index - 1].vertices;
+            if (alternative_clear_selector) {
+                for (UINT clear_index = 1; clear_index <= best_snapshot.clears.size(); ++clear_index) {
+                    if (best_snapshot.clears[clear_index - 1].drawcalls > bestClearDrawcalls) {
+                        bestClearDrawcalls = best_snapshot.clears[clear_index - 1].drawcalls;
 
-                    if (bestClearIndex != clear_index) {
-                        bestClearIndex = clear_index;
+                        if (bestClearIndex != clear_index) {
+                            bestClearIndex = clear_index;
+                        }
                     }
                 }
-            }
 
-            if (best_match == depthstencil_clear_index.first && depthstencil_clear_index.second != bestClearIndex)
-                depthstencil_clear_index.second = bestClearIndex;
+                if (best_match == depthstencil_clear_index.first && depthstencil_clear_index.second != bestClearIndex)
+                    depthstencil_clear_index.second = bestClearIndex;
+            }
 
             return _depthstencil_clear_texture;
         }
