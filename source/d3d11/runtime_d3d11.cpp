@@ -288,7 +288,7 @@ void reshade::d3d11::runtime_d3d11::on_present()
 
 #if RESHADE_DEPTH
     update_depth_texture_bindings(_has_high_network_activity ? nullptr : _buffer_detection->find_best_depth_texture(_filter_aspect_ratio ? _width : 0, _height, _depth_texture_override));
-    update_depth_alt_texture_bindings(_has_high_network_activity ? nullptr : _buffer_detection->_depthstencil_alternative);
+    update_alt_depth_texture_bindings(_has_high_network_activity ? nullptr : _buffer_detection->_depthstencil_alternative);
 #endif
 
     _app_state.capture(_immediate_context.get());
@@ -862,6 +862,12 @@ bool reshade::d3d11::runtime_d3d11::init_texture(texture& texture)
         impl->srv[1] = _depth_texture_srv;
 #endif
         return true;
+    case texture_reference::depth_buffer_alt:
+#if RESHADE_DEPTH
+        impl->srv[0] = _depth_texture_srv_alt;
+        impl->srv[1] = _depth_texture_srv_alt;
+#endif
+        return true;
     }
 
     D3D11_TEXTURE2D_DESC desc = {};
@@ -1407,7 +1413,7 @@ void reshade::d3d11::runtime_d3d11::draw_depth_debug_menu(buffer_detection_conte
     modified |= ImGui::Checkbox("Use aspect ratio heuristics", &_filter_aspect_ratio);
     modified |= ImGui::Checkbox("Copy depth buffer before clear operations", &tracker.preserve_depth_buffers);
     modified |= ImGui::Checkbox("Use alternative clear auto-selector", &tracker.alternative_clear_selector);
-    modified |= ImGui::SliderInt("Alternative depth buffer index", &tracker.depth_buffer_alt_index, 0, tracker.depth_buffer_counters().size());
+    // modified |= ImGui::SliderInt("Alternative depth buffer index", &tracker.depth_buffer_alt_index, 0, tracker.depth_buffer_counters().size());
 
     if (modified) // Detection settings have changed, reset heuristic
         tracker.reset(true);
@@ -1443,8 +1449,15 @@ void reshade::d3d11::runtime_d3d11::draw_depth_debug_menu(buffer_detection_conte
                 sprintf_s(label, "%s  CLEAR %2u", (clear_index == tracker.depthstencil_clear_index.second ? "> " : "  "), clear_index);
 
                 if (bool value = (tracker.depthstencil_clear_index.second == clear_index);
-                    ImGui::Checkbox(label, &value)) {
+                    ImGui::Checkbox("", &value)) {
                     tracker.depthstencil_clear_index.second = value ? clear_index : 0;
+                    modified = true;
+                }
+
+                ImGui::SameLine();
+                if (bool valueAlt = (tracker.depth_buffer_alt_index == clear_index);
+                    ImGui::Checkbox(label, &valueAlt)) {
+                    tracker.depth_buffer_alt_index = valueAlt ? tracker.depth_buffer_alt_index = clear_index : tracker.depth_buffer_alt_index = 0;
                     modified = true;
                 }
 
@@ -1522,21 +1535,20 @@ void reshade::d3d11::runtime_d3d11::update_depth_texture_bindings(com_ptr<ID3D11
     }
 }
 
-void reshade::d3d11::runtime_d3d11::update_depth_alt_texture_bindings(com_ptr<ID3D11Texture2D> depth_texture)
+void reshade::d3d11::runtime_d3d11::update_alt_depth_texture_bindings(com_ptr<ID3D11Texture2D> depth_texture)
 {
     if (_has_high_network_activity)
         depth_texture.reset();
 
-    if (depth_texture == _depth_texture)
+    if (depth_texture == _depth_texture_alt || !_has_depth_texture)
         return;
 
-    _depth_texture = std::move(depth_texture);
-    _depth_texture_srv.reset();
-    _has_depth_texture = false;
+    _depth_texture_alt = std::move(depth_texture);
+    _depth_texture_srv_alt.reset();
 
-    if (_depth_texture != nullptr) {
+    if (_depth_texture_alt != nullptr) {
         D3D11_TEXTURE2D_DESC tex_desc;
-        _depth_texture->GetDesc(&tex_desc);
+        _depth_texture_alt->GetDesc(&tex_desc);
         assert((tex_desc.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0);
 
         D3D11_SHADER_RESOURCE_VIEW_DESC srv_desc = {};
@@ -1544,10 +1556,8 @@ void reshade::d3d11::runtime_d3d11::update_depth_alt_texture_bindings(com_ptr<ID
         srv_desc.Texture2D.MipLevels = 1;
         srv_desc.Format = make_dxgi_format_normal(tex_desc.Format);
 
-        if (HRESULT hr = _device->CreateShaderResourceView(_depth_texture.get(), &srv_desc, &_depth_texture_srv); FAILED(hr)) {
+        if (HRESULT hr = _device->CreateShaderResourceView(_depth_texture_alt.get(), &srv_desc, &_depth_texture_srv_alt); FAILED(hr)) {
             LOG(ERROR) << "Failed to create depth-stencil resource view! HRESULT is " << hr << '.';
-        } else {
-            _has_depth_texture = true;
         }
     }
 
@@ -1567,10 +1577,10 @@ void reshade::d3d11::runtime_d3d11::update_depth_alt_texture_bindings(com_ptr<ID
                 // Replace all occurrences of the old resource view with the new one
                 for (com_ptr<ID3D11ShaderResourceView>& srv : pass_data.srvs)
                     if (tex_impl->srv[0] == srv || tex_impl->srv[1] == srv)
-                        srv = _depth_texture_srv;
+                        srv = _depth_texture_srv_alt;
         }
 
-        tex_impl->srv[0] = tex_impl->srv[1] = _depth_texture_srv;
+        tex_impl->srv[0] = tex_impl->srv[1] = _depth_texture_srv_alt;
     }
 }
 #endif

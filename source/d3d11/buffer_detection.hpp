@@ -68,7 +68,7 @@ public:
     std::pair<ID3D11Texture2D*, UINT> depthstencil_clear_index = { nullptr, 0 };
 
     const auto& depth_buffer_counters() const { return _counters_per_used_depth_texture; }
-    com_ptr<ID3D11Texture2D> _depthstencil_alternative;
+    com_ptr<ID3D11Texture2D> _depthstencil_alternative = nullptr;
 
     com_ptr<ID3D11Texture2D> find_best_depth_texture(UINT width, UINT height,
         com_ptr<ID3D11Texture2D> override = nullptr);
@@ -79,6 +79,7 @@ private:
     bool update_depthstencil_clear_texture(D3D11_TEXTURE2D_DESC desc);
     bool update_depthstencil_alt_texture(D3D11_TEXTURE2D_DESC desc);
 
+    int lastBufferSize;
     draw_stats _previous_stats;
     com_ptr<ID3D11Texture2D> _depthstencil_clear_texture;
 #endif

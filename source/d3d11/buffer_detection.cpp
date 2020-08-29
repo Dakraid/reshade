@@ -9,7 +9,8 @@
 #include <cmath>
 
 #if RESHADE_DEPTH
-static inline com_ptr<ID3D11Texture2D> texture_from_dsv(ID3D11DepthStencilView* dsv)
+static inline com_ptr<ID3D11Texture2D>
+texture_from_dsv(ID3D11DepthStencilView* dsv)
 {
     if (dsv == nullptr)
         return nullptr;
@@ -22,7 +23,9 @@ static inline com_ptr<ID3D11Texture2D> texture_from_dsv(ID3D11DepthStencilView* 
 }
 #endif
 
-void reshade::d3d11::buffer_detection::init(ID3D11DeviceContext* device_context, const buffer_detection_context* context)
+void reshade::d3d11::buffer_detection::init(
+    ID3D11DeviceContext* device_context,
+    const buffer_detection_context* context)
 {
     _device_context = device_context;
     _context = context;
@@ -70,14 +73,17 @@ void reshade::d3d11::buffer_detection::merge(const buffer_detection& source)
     if (source._best_copy_stats.vertices > _best_copy_stats.vertices)
         _best_copy_stats = source._best_copy_stats;
 
-    for (const auto& [dsv_texture, snapshot] : source._counters_per_used_depth_texture) {
+    for (const auto& [dsv_texture, snapshot] :
+        source._counters_per_used_depth_texture) {
         auto& target_snapshot = _counters_per_used_depth_texture[dsv_texture];
         target_snapshot.total_stats.vertices += snapshot.total_stats.vertices;
         target_snapshot.total_stats.drawcalls += snapshot.total_stats.drawcalls;
         target_snapshot.current_stats.vertices += snapshot.current_stats.vertices;
         target_snapshot.current_stats.drawcalls += snapshot.current_stats.drawcalls;
 
-        target_snapshot.clears.insert(target_snapshot.clears.end(), snapshot.clears.begin(), snapshot.clears.end());
+        target_snapshot.clears.insert(target_snapshot.clears.end(),
+            snapshot.clears.begin(),
+            snapshot.clears.end());
     }
 #endif
 }
@@ -95,11 +101,13 @@ void reshade::d3d11::buffer_detection::on_draw(UINT vertices)
     if (dsv_texture == nullptr)
         return; // This is a draw call with no depth-stencil bound
 
-    // See 'D3D11DeviceContext::DrawInstancedIndirect' and 'D3D11DeviceContext::DrawIndexedInstancedIndirect'
+    // See 'D3D11DeviceContext::DrawInstancedIndirect' and
+    // 'D3D11DeviceContext::DrawIndexedInstancedIndirect'
     if (vertices == 0)
         _has_indirect_drawcalls = true;
 
-    // Check if this draw call likely represents a fullscreen rectangle (one or two triangles), which would clear the depth-stencil
+    // Check if this draw call likely represents a fullscreen rectangle (one or
+    // two triangles), which would clear the depth-stencil
     if (_context->preserve_depth_buffers && vertices <= 6 && _depth_stencil_cleared) {
         D3D11_RASTERIZER_DESC rs_desc;
         com_ptr<ID3D11RasterizerState> rs;
@@ -130,7 +138,8 @@ void reshade::d3d11::buffer_detection::on_draw(UINT vertices)
 }
 
 #if RESHADE_DEPTH
-void reshade::d3d11::buffer_detection::on_clear_depthstencil(UINT clear_flags, ID3D11DepthStencilView* dsv, bool fullscreen_draw_call)
+void reshade::d3d11::buffer_detection::on_clear_depthstencil(
+    UINT clear_flags, ID3D11DepthStencilView* dsv, bool fullscreen_draw_call)
 {
     assert(_context != nullptr);
 
@@ -162,8 +171,11 @@ void reshade::d3d11::buffer_detection::on_clear_depthstencil(UINT clear_flags, I
 
     // Make a backup copy of the depth texture before it is cleared
     // If clear index override is set to zero, always copy any suitable buffers
-    // This is not really correct, since clears may accumulate over multiple command lists, but it's unlikely that the same depth-stencil is used in more than once
-    // Since clears from fullscreen draw calls are selected based on their order (last one wins), their stats are ignored for the regular clear heuristic
+    // This is not really correct, since clears may accumulate over multiple
+    // command lists, but it's unlikely that the same depth-stencil is used in
+    // more than once Since clears from fullscreen draw calls are selected based
+    // on their order (last one wins), their stats are ignored for the regular
+    // clear heuristic
     if (_context->depthstencil_clear_index.second == 0
             ? fullscreen_draw_call || counters.current_stats.drawcalls > _best_copy_stats.drawcalls
             : counters.clears.size() == _context->depthstencil_clear_index.second) {
@@ -171,21 +183,21 @@ void reshade::d3d11::buffer_detection::on_clear_depthstencil(UINT clear_flags, I
             _best_copy_stats = counters.current_stats;
         }
 
-        _device_context->CopyResource(_context->_depthstencil_clear_texture.get(), dsv_texture.get());
+        _device_context->CopyResource(_context->_depthstencil_clear_texture.get(),
+            dsv_texture.get());
     }
 
-    UINT selectedIndex = _context->depth_buffer_alt_index;
-    if (_context->_depthstencil_alternative == nullptr || selectedIndex == 0) {
-        _device_context->CopyResource(_context->_depthstencil_alternative.get(), dsv_texture.get());
-    } else if (selectedIndex == counters.clears.size()) {
-        _device_context->CopyResource(_context->_depthstencil_alternative.get(), dsv_texture.get());
+    if (_context->depth_buffer_alt_index == counters.clears.size()) {
+        _device_context->CopyResource(_context->_depthstencil_alternative.get(),
+            dsv_texture.get());
     }
 
     // Reset draw call stats for clears
     counters.current_stats = { 0, 0 };
 }
 
-bool reshade::d3d11::buffer_detection_context::update_depthstencil_clear_texture(D3D11_TEXTURE2D_DESC desc)
+bool reshade::d3d11::buffer_detection_context::
+    update_depthstencil_clear_texture(D3D11_TEXTURE2D_DESC desc)
 {
     if (_depthstencil_clear_texture != nullptr) {
         D3D11_TEXTURE2D_DESC existing_desc;
@@ -205,15 +217,18 @@ bool reshade::d3d11::buffer_detection_context::update_depthstencil_clear_texture
     com_ptr<ID3D11Device> device;
     _device_context->GetDevice(&device);
 
-    if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_clear_texture); FAILED(hr)) {
-        LOG(ERROR) << "Failed to create depth-stencil texture! HRESULT is " << hr << '.';
+    if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_clear_texture);
+        FAILED(hr)) {
+        LOG(ERROR) << "Failed to create depth-stencil texture! HRESULT is " << hr
+                   << '.';
         return false;
     }
 
     return true;
 }
 
-bool reshade::d3d11::buffer_detection_context::update_depthstencil_alt_texture(D3D11_TEXTURE2D_DESC desc)
+bool reshade::d3d11::buffer_detection_context::update_depthstencil_alt_texture(
+    D3D11_TEXTURE2D_DESC desc)
 {
     if (_depthstencil_alternative != nullptr) {
         D3D11_TEXTURE2D_DESC existing_desc;
@@ -233,15 +248,20 @@ bool reshade::d3d11::buffer_detection_context::update_depthstencil_alt_texture(D
     com_ptr<ID3D11Device> device;
     _device_context->GetDevice(&device);
 
-    if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_alternative); FAILED(hr)) {
-        LOG(ERROR) << "Failed to create depth-stencil texture! HRESULT is " << hr << '.';
+    if (HRESULT hr = device->CreateTexture2D(&desc, nullptr, &_depthstencil_alternative);
+        FAILED(hr)) {
+        LOG(ERROR)
+            << "Failed to create alternative depth-stencil texture! HRESULT is "
+            << hr << '.';
         return false;
     }
 
     return true;
 }
 
-com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_depth_texture(UINT width, UINT height, com_ptr<ID3D11Texture2D> override)
+com_ptr<ID3D11Texture2D>
+reshade::d3d11::buffer_detection_context::find_best_depth_texture(
+    UINT width, UINT height, com_ptr<ID3D11Texture2D> override)
 {
     depthstencil_info best_snapshot;
     com_ptr<ID3D11Texture2D> best_match = std::move(override);
@@ -257,7 +277,8 @@ com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_dep
             assert((desc.BindFlags & D3D11_BIND_DEPTH_STENCIL) != 0);
 
             if (desc.SampleDesc.Count > 1)
-                continue; // Ignore MSAA textures, since they would need to be resolved first
+                continue; // Ignore MSAA textures, since they would need to be resolved
+                    // first
 
             assert((desc.BindFlags & D3D11_BIND_SHADER_RESOURCE) != 0);
 
@@ -272,11 +293,14 @@ com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_dep
                     continue; // Not a good fit
             }
 
-            if (!_has_indirect_drawcalls ?
-                                         // Choose snapshot with the most vertices, since that is likely to contain the main scene
+            if (!_has_indirect_drawcalls
+                    ?
+                    // Choose snapshot with the most vertices, since that is likely to
+                    // contain the main scene
                     snapshot.total_stats.vertices > best_snapshot.total_stats.vertices
-                                         :
-                                         // Or check draw calls, since vertices may not be accurate if application is using indirect draw calls
+                    :
+                    // Or check draw calls, since vertices may not be accurate if
+                    // application is using indirect draw calls
                     snapshot.total_stats.drawcalls > best_snapshot.total_stats.drawcalls) {
                 best_match = dsv_texture;
                 best_snapshot = snapshot;
@@ -292,13 +316,12 @@ com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_dep
         D3D11_TEXTURE2D_DESC desc;
         best_match->GetDesc(&desc);
 
-        update_depthstencil_alt_texture(desc);
-
         if (update_depthstencil_clear_texture(desc)) {
-            UINT bestClearDrawcalls = 0, bestClearIndex = 0;
-
             if (alternative_clear_selector) {
-                for (UINT clear_index = 1; clear_index <= best_snapshot.clears.size(); ++clear_index) {
+                UINT bestClearDrawcalls = 0, bestClearIndex = 0;
+
+                for (UINT clear_index = 1; clear_index <= best_snapshot.clears.size();
+                     ++clear_index) {
                     if (best_snapshot.clears[clear_index - 1].drawcalls > bestClearDrawcalls) {
                         bestClearDrawcalls = best_snapshot.clears[clear_index - 1].drawcalls;
 
@@ -310,6 +333,24 @@ com_ptr<ID3D11Texture2D> reshade::d3d11::buffer_detection_context::find_best_dep
 
                 if (best_match == depthstencil_clear_index.first && depthstencil_clear_index.second != bestClearIndex)
                     depthstencil_clear_index.second = bestClearIndex;
+            }
+
+            if (update_depthstencil_alt_texture(desc)) {
+                /*Deus Ex specific adjustments*/
+                if (best_snapshot.clears.size() <= 2 && depthstencil_clear_index.second != 1) {
+                    depth_buffer_alt_index = depthstencil_clear_index.second;
+                } else if (best_snapshot.clears.size() <= 2 && depthstencil_clear_index.second == 1) {
+                    depth_buffer_alt_index = 2;
+                } else if (best_snapshot.clears.size() == 3) {
+                    depth_buffer_alt_index = 1;
+                }
+
+                /* Generic fallback method
+				if (depth_buffer_alt_index > best_snapshot.clears.size() || best_snapshot.clears.size() != lastBufferSize) {
+					depth_buffer_alt_index = depthstencil_clear_index.second;
+					astBufferSize = best_snapshot.clears.size();
+				}
+				*/
             }
 
             return _depthstencil_clear_texture;

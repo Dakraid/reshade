@@ -79,10 +79,13 @@ private:
 #if RESHADE_DEPTH
     void draw_depth_debug_menu(buffer_detection_context& tracker);
     void update_depth_texture_bindings(com_ptr<ID3D11Texture2D> texture);
-    void update_depth_alt_texture_bindings(com_ptr<ID3D11Texture2D> texture);
+    void update_alt_depth_texture_bindings(com_ptr<ID3D11Texture2D> texture);
 
     com_ptr<ID3D11Texture2D> _depth_texture;
     com_ptr<ID3D11ShaderResourceView> _depth_texture_srv;
+
+    com_ptr<ID3D11Texture2D> _depth_texture_alt;
+    com_ptr<ID3D11ShaderResourceView> _depth_texture_srv_alt;
 
     bool _filter_aspect_ratio = true;
     ID3D11Texture2D* _depth_texture_override = nullptr;
